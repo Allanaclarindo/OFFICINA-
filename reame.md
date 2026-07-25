@@ -1,0 +1,10 @@
+package.json
+vite.config.js
+index.html
+.gitignore
+README.md
+src/
+  main.jsx
+  App.jsx
+  App.css
+  index.css
