@@ -35,6 +35,7 @@ export default function App() {
   const [nextCode, setNextCode] = useState(() => loadJSON(PRODUCTS_KEY, { items: [], nextCode: 1 }).nextCode || 1);
   const [services, setServices] = useState(() => loadJSON(SERVICES_KEY, []));
   const [sales, setSales] = useState(() => loadJSON(SALES_KEY, []));
+  const [receiptSale, setReceiptSale] = useState(null);
 
   useEffect(() => {
     localStorage.setItem(PRODUCTS_KEY, JSON.stringify({ items: products, nextCode }));
@@ -77,6 +78,7 @@ export default function App() {
     if (type === "produto") {
       setProducts(products.map((p) => p.id === itemId ? { ...p, stock: Math.max(0, p.stock - quantity) } : p));
     }
+    setReceiptSale(sale);
   };
 
   const removeSale = (id) => {
@@ -143,6 +145,34 @@ export default function App() {
           {view === "vendas" && <VendasPage sales={sales} products={products} services={services} onSell={registerSale} onRemove={removeSale} />}
         </div>
       </main>
+
+      {receiptSale && <ReceiptModal sale={receiptSale} onClose={() => setReceiptSale(null)} />}
+    </div>
+  );
+}
+
+function ReceiptModal({ sale, onClose }) {
+  return (
+    <div className="modal-backdrop no-print-hide">
+      <div className="receipt-modal">
+        <div className="receipt-print-area">
+          <p className="receipt-brand">Oficina<span>OS</span></p>
+          <p className="receipt-sub">Recibo de venda (comprovante não fiscal)</p>
+          <div className="receipt-divider" />
+          <p className="receipt-line"><span>Data</span><span>{new Date(sale.date).toLocaleString("pt-BR")}</span></p>
+          <p className="receipt-line"><span>Item</span><span>{sale.itemName}</span></p>
+          <p className="receipt-line"><span>Tipo</span><span>{sale.type === "produto" ? "Produto" : "Serviço"}</span></p>
+          <p className="receipt-line"><span>Quantidade</span><span>{sale.quantity}</span></p>
+          <p className="receipt-line"><span>Preço unitário</span><span>{money.format(sale.unitPrice)}</span></p>
+          <p className="receipt-line"><span>Forma de pagamento</span><span>{sale.payment}</span></p>
+          <div className="receipt-divider" />
+          <p className="receipt-total"><span>Total</span><span>{money.format(sale.total)}</span></p>
+        </div>
+        <div className="receipt-actions no-print">
+          <button className="icon-button" onClick={onClose}><X size={18} /></button>
+          <button className="primary-button full-button" onClick={() => window.print()}><Receipt size={16} /> Imprimir / salvar PDF</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -382,6 +412,7 @@ function ServicesPage({ services, onAdd, onRemove, onSell }) {
 function VendasPage({ sales, products, services, onSell, onRemove }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [viewReceipt, setViewReceipt] = useState(null);
   const allItems = [
     ...products.map((p) => ({ type: "produto", id: p.id, name: p.name, price: p.price, stock: p.stock })),
     ...services.map((s) => ({ type: "servico", id: s.id, name: s.name, price: s.price })),
@@ -410,7 +441,10 @@ function VendasPage({ sales, products, services, onSell, onRemove }) {
                 <td>{s.quantity}</td>
                 <td><span className="payment-chip small">{s.payment}</span></td>
                 <td>{money.format(s.total)}</td>
-                <td style={{ textAlign: "right" }}><button className="icon-button danger" title="Estornar" onClick={() => onRemove(s.id)}><Trash2 size={15} /></button></td>
+                <td className="row-actions">
+                  <button className="icon-button" title="Ver recibo" onClick={() => setViewReceipt(s)}><Receipt size={15} /></button>
+                  <button className="icon-button danger" title="Estornar" onClick={() => onRemove(s.id)}><Trash2 size={15} /></button>
+                </td>
               </tr>
             )) : (
               <tr><td colSpan={6} className="empty-cell"><ShoppingCart size={24} style={{ verticalAlign: "middle" }} /> Nenhuma venda registrada ainda.</td></tr>
@@ -422,6 +456,8 @@ function VendasPage({ sales, products, services, onSell, onRemove }) {
       {open && (
         <SaleModal allItems={allItems} onClose={() => setOpen(false)} onConfirm={(sale) => { onSell(sale); setOpen(false); }} />
       )}
+
+      {viewReceipt && <ReceiptModal sale={viewReceipt} onClose={() => setViewReceipt(null)} />}
     </div>
   );
 }
