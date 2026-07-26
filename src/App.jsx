@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   LayoutGrid, Package, Wrench, Plus, Search, Trash2, X,
-  Boxes, Receipt, TrendingUp, AlertTriangle, Menu, ShoppingCart, Banknote, CreditCard, QrCode,
+  Boxes, Receipt, TrendingUp, AlertTriangle, Menu, ShoppingCart, Banknote, CreditCard, QrCode, Pencil,
 } from "lucide-react";
 import "./App.css";
 
@@ -62,12 +62,18 @@ export default function App() {
     setNextCode(nextCode + 1);
   };
   const removeProduct = (id) => setProducts(products.filter((p) => p.id !== id));
+  const updateProduct = (id, form) => setProducts(products.map((p) => p.id === id ? {
+    ...p, name: form.name.trim(), description: form.description.trim(), price: Number(form.price) || 0, stock: Number(form.stock) || 0,
+  } : p));
 
   const addService = (form) => {
     const item = { id: crypto.randomUUID(), name: form.name.trim(), description: form.description.trim(), price: Number(form.price) || 0 };
     setServices([item, ...services]);
   };
   const removeService = (id) => setServices(services.filter((s) => s.id !== id));
+  const updateService = (id, form) => setServices(services.map((s) => s.id === id ? {
+    ...s, name: form.name.trim(), description: form.description.trim(), price: Number(form.price) || 0,
+  } : s));
 
   const registerSale = ({ type, itemId, itemName, unitPrice, quantity, payment }) => {
     const sale = {
@@ -140,8 +146,8 @@ export default function App() {
       <main className="main-area">
         <div className="page">
           {view === "dashboard" && <Dashboard stats={stats} setView={setView} sales={sales} />}
-          {view === "produtos" && <ProductsPage products={products} onAdd={addProduct} onRemove={removeProduct} nextCode={nextCode} onSell={registerSale} />}
-          {view === "servicos" && <ServicesPage services={services} onAdd={addService} onRemove={removeService} onSell={registerSale} />}
+          {view === "produtos" && <ProductsPage products={products} onAdd={addProduct} onUpdate={updateProduct} onRemove={removeProduct} nextCode={nextCode} onSell={registerSale} />}
+          {view === "servicos" && <ServicesPage services={services} onAdd={addService} onUpdate={updateService} onRemove={removeService} onSell={registerSale} />}
           {view === "vendas" && <VendasPage sales={sales} products={products} services={services} onSell={registerSale} onRemove={removeSale} />}
         </div>
       </main>
@@ -282,17 +288,25 @@ function SaleModal({ presetItem, allItems, onClose, onConfirm }) {
   );
 }
 
-function ProductsPage({ products, onAdd, onRemove, nextCode, onSell }) {
+function ProductsPage({ products, onAdd, onUpdate, onRemove, nextCode, onSell }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [editItem, setEditItem] = useState(null);
   const [sellItem, setSellItem] = useState(null);
   const [form, setForm] = useState(emptyProductForm);
   const filtered = products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()));
 
+  const startEdit = (p) => {
+    setForm({ name: p.name, description: p.description, price: String(p.price), stock: String(p.stock) });
+    setEditItem(p);
+  };
+  const closeModal = () => { setOpen(false); setEditItem(null); setForm(emptyProductForm); };
+
   const submit = (e) => {
     e.preventDefault();
     if (!form.name.trim() || !form.price) return;
-    onAdd(form); setForm(emptyProductForm); setOpen(false);
+    if (editItem) { onUpdate(editItem.id, form); } else { onAdd(form); }
+    closeModal();
   };
 
   return (
@@ -317,6 +331,7 @@ function ProductsPage({ products, onAdd, onRemove, nextCode, onSell }) {
                 <td><span className={`stock-badge ${p.stock <= 3 ? "low" : ""}`}>{p.stock} un.</span></td>
                 <td className="row-actions">
                   <button className="icon-button" title="Vender" disabled={p.stock <= 0} onClick={() => setSellItem({ type: "produto", id: p.id, name: p.name, price: p.price, stock: p.stock })}><ShoppingCart size={15} /></button>
+                  <button className="icon-button" title="Editar" onClick={() => startEdit(p)}><Pencil size={15} /></button>
                   <button className="icon-button danger" title="Excluir" onClick={() => onRemove(p.id)}><Trash2 size={15} /></button>
                 </td>
               </tr>
@@ -327,18 +342,18 @@ function ProductsPage({ products, onAdd, onRemove, nextCode, onSell }) {
         </table>
       </div>
 
-      {open && (
+      {(open || editItem) && (
         <div className="modal-backdrop">
           <form className="form-modal" onSubmit={submit}>
-            <div className="modal-title"><div><p className="eyebrow">NOVA PEÇA</p><h2>Cadastrar produto</h2></div><button type="button" className="icon-button" onClick={() => setOpen(false)}><X size={18} /></button></div>
-            <div className="barcode-note"><Boxes size={14} /> Código gerado automaticamente: <span>{genCode(nextCode)}</span></div>
+            <div className="modal-title"><div><p className="eyebrow">{editItem ? "EDITAR PEÇA" : "NOVA PEÇA"}</p><h2>{editItem ? "Editar produto" : "Cadastrar produto"}</h2></div><button type="button" className="icon-button" onClick={closeModal}><X size={18} /></button></div>
+            <div className="barcode-note"><Boxes size={14} /> Código interno: <span>{editItem ? editItem.code : genCode(nextCode)}</span></div>
             <label>Nome do produto<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
             <label>Descrição<textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
             <div className="form-row">
               <label>Preço (R$)<input required type="number" step="0.01" min="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></label>
               <label>Estoque<input required type="number" min="0" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} /></label>
             </div>
-            <button type="submit" className="primary-button full-button">Salvar produto</button>
+            <button type="submit" className="primary-button full-button">{editItem ? "Salvar alterações" : "Salvar produto"}</button>
           </form>
         </div>
       )}
@@ -350,17 +365,25 @@ function ProductsPage({ products, onAdd, onRemove, nextCode, onSell }) {
   );
 }
 
-function ServicesPage({ services, onAdd, onRemove, onSell }) {
+function ServicesPage({ services, onAdd, onUpdate, onRemove, onSell }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [editItem, setEditItem] = useState(null);
   const [sellItem, setSellItem] = useState(null);
   const [form, setForm] = useState(emptyServiceForm);
   const filtered = services.filter((s) => s.name.toLowerCase().includes(query.toLowerCase()));
 
+  const startEdit = (s) => {
+    setForm({ name: s.name, description: s.description, price: String(s.price) });
+    setEditItem(s);
+  };
+  const closeModal = () => { setOpen(false); setEditItem(null); setForm(emptyServiceForm); };
+
   const submit = (e) => {
     e.preventDefault();
     if (!form.name.trim() || !form.price) return;
-    onAdd(form); setForm(emptyServiceForm); setOpen(false);
+    if (editItem) { onUpdate(editItem.id, form); } else { onAdd(form); }
+    closeModal();
   };
 
   return (
@@ -379,6 +402,7 @@ function ServicesPage({ services, onAdd, onRemove, onSell }) {
             <Wrench size={18} className="service-card-icon" />
             <div className="service-actions">
               <button className="icon-button" title="Vender" onClick={() => setSellItem({ type: "servico", id: s.id, name: s.name, price: s.price })}><ShoppingCart size={15} /></button>
+              <button className="icon-button" title="Editar" onClick={() => startEdit(s)}><Pencil size={15} /></button>
               <button className="icon-button danger" title="Excluir" onClick={() => onRemove(s.id)}><Trash2 size={15} /></button>
             </div>
             <p className="service-price">{money.format(s.price)}</p>
@@ -390,14 +414,14 @@ function ServicesPage({ services, onAdd, onRemove, onSell }) {
         )}
       </div>
 
-      {open && (
+      {(open || editItem) && (
         <div className="modal-backdrop">
           <form className="form-modal" onSubmit={submit}>
-            <div className="modal-title"><div><p className="eyebrow">NOVA MÃO DE OBRA</p><h2>Cadastrar serviço</h2></div><button type="button" className="icon-button" onClick={() => setOpen(false)}><X size={18} /></button></div>
+            <div className="modal-title"><div><p className="eyebrow">{editItem ? "EDITAR MÃO DE OBRA" : "NOVA MÃO DE OBRA"}</p><h2>{editItem ? "Editar serviço" : "Cadastrar serviço"}</h2></div><button type="button" className="icon-button" onClick={closeModal}><X size={18} /></button></div>
             <label>Nome do serviço<input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
             <label>Descrição<textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
             <label>Preço (R$)<input required type="number" step="0.01" min="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></label>
-            <button type="submit" className="primary-button full-button">Salvar serviço</button>
+            <button type="submit" className="primary-button full-button">{editItem ? "Salvar alterações" : "Salvar serviço"}</button>
           </form>
         </div>
       )}
