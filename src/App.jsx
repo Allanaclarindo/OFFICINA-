@@ -2,15 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import {
   LayoutGrid, Package, Wrench, Plus, Search, Trash2, X,
   Boxes, Receipt, TrendingUp, AlertTriangle, Menu, ShoppingCart, Banknote, CreditCard, QrCode, Pencil,
+  Users, Car,
 } from "lucide-react";
+import { supabase } from "./lib/supabase";
 import "./App.css";
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-const PRODUCTS_KEY = "oficina-produtos";
-const SERVICES_KEY = "oficina-servicos";
-const SALES_KEY = "oficina-vendas";
 const emptyProductForm = { name: "", description: "", price: "", stock: "" };
 const emptyServiceForm = { name: "", description: "", price: "" };
+const emptyClienteForm = { nome: "", telefone: "" };
+const emptyVeiculoForm = { placa: "", marca: "", modelo: "", ano: "" };
 const PAYMENT_METHODS = ["Dinheiro", "Cartão", "Pix"];
 const paymentIcon = { "Dinheiro": Banknote, "Cartão": CreditCard, "Pix": QrCode };
 
@@ -18,79 +19,159 @@ function genCode(n) {
   return `OF-${String(n).padStart(5, "0")}`;
 }
 
-function loadJSON(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
+const mapProduto = (r) => ({ id: r.id, code: r.code, name: r.name, description: r.description || "", price: Number(r.price), stock: r.stock });
+const mapServico = (r) => ({ id: r.id, name: r.name, description: r.description || "", price: Number(r.price) });
+const mapCliente = (r) => ({ id: r.id, nome: r.nome, telefone: r.telefone || "" });
+const mapVeiculo = (r) => ({ id: r.id, clienteId: r.cliente_id, placa: r.placa || "", marca: r.marca || "", modelo: r.modelo || "", ano: r.ano || "" });
+const mapVenda = (r) => ({
+  id: r.id, type: r.type, itemId: r.item_id, itemName: r.item_name, unitPrice: Number(r.unit_price),
+  quantity: r.quantity, total: Number(r.total), payment: r.payment, clienteId: r.cliente_id, veiculoId: r.veiculo_id, date: r.created_at,
+});
 
 export default function App() {
   const [view, setView] = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  const [products, setProducts] = useState(() => loadJSON(PRODUCTS_KEY, { items: [], nextCode: 1 }).items || []);
-  const [nextCode, setNextCode] = useState(() => loadJSON(PRODUCTS_KEY, { items: [], nextCode: 1 }).nextCode || 1);
-  const [services, setServices] = useState(() => loadJSON(SERVICES_KEY, []));
-  const [sales, setSales] = useState(() => loadJSON(SALES_KEY, []));
+  const [products, setProducts] = useState([]);
+  const [nextCode, setNextCode] = useState(1);
+  const [services, setServices] = useState([]);
+  const [sales, setSales] = useState([]);
+  const [clientes, setClientes] = useState([]);
+  const [veiculos, setVeiculos] = useState([]);
   const [receiptSale, setReceiptSale] = useState(null);
 
   useEffect(() => {
-    localStorage.setItem(PRODUCTS_KEY, JSON.stringify({ items: products, nextCode }));
-  }, [products, nextCode]);
+    (async () => {
+      setLoading(true);
+      const [p, s, v, c, ve] = await Promise.all([
+        supabase.from("produtos").select("*").order("created_at", { ascending: false }),
+        supabase.from("servicos").select("*").order("created_at", { ascending: false }),
+        supabase.from("vendas").select("*").order("created_at", { ascending: false }),
+        supabase.from("clientes").select("*").order("created_at", { ascending: false }),
+        supabase.from("veiculos").select("*").order("created_at", { ascending: false }),
+      ]);
+      if (p.error || s.error || v.error || c.error || ve.error) {
+        setErrorMsg("Não foi possível carregar os dados do Supabase. Confira a conexão.");
+      } else {
+        const prods = p.data.map(mapProduto);
+        setProducts(prods);
+        setNextCode(prods.length + 1);
+        setServices(s.data.map(mapServico));
+        setSales(v.data.map(mapVenda));
+        setClientes(c.data.map(mapCliente));
+        setVeiculos(ve.data.map(mapVeiculo));
+      }
+      setLoading(false);
+    })();
+  }, []);
 
-  useEffect(() => {
-    localStorage.setItem(SERVICES_KEY, JSON.stringify(services));
-  }, [services]);
-
-  useEffect(() => {
-    localStorage.setItem(SALES_KEY, JSON.stringify(sales));
-  }, [sales]);
-
-  const addProduct = (form) => {
-    const item = {
-      id: crypto.randomUUID(),
-      code: genCode(nextCode),
-      name: form.name.trim(),
-      description: form.description.trim(),
-      price: Number(form.price) || 0,
-      stock: Number(form.stock) || 0,
-    };
-    setProducts([item, ...products]);
+  const addProduct = async (form) => {
+    const code = genCode(nextCode);
+    const { data, error } = await supabase.from("produtos").insert({
+      code, name: form.name.trim(), description: form.description.trim(), price: Number(form.price) || 0, stock: Number(form.stock) || 0,
+    }).select().single();
+    if (error) { setErrorMsg("Erro ao salvar produto."); return; }
+    setProducts([mapProduto(data), ...products]);
     setNextCode(nextCode + 1);
   };
-  const removeProduct = (id) => setProducts(products.filter((p) => p.id !== id));
-  const updateProduct = (id, form) => setProducts(products.map((p) => p.id === id ? {
-    ...p, name: form.name.trim(), description: form.description.trim(), price: Number(form.price) || 0, stock: Number(form.stock) || 0,
-  } : p));
-
-  const addService = (form) => {
-    const item = { id: crypto.randomUUID(), name: form.name.trim(), description: form.description.trim(), price: Number(form.price) || 0 };
-    setServices([item, ...services]);
+  const updateProduct = async (id, form) => {
+    const payload = { name: form.name.trim(), description: form.description.trim(), price: Number(form.price) || 0, stock: Number(form.stock) || 0 };
+    const { error } = await supabase.from("produtos").update(payload).eq("id", id);
+    if (error) { setErrorMsg("Erro ao atualizar produto."); return; }
+    setProducts(products.map((p) => p.id === id ? { ...p, ...payload } : p));
   };
-  const removeService = (id) => setServices(services.filter((s) => s.id !== id));
-  const updateService = (id, form) => setServices(services.map((s) => s.id === id ? {
-    ...s, name: form.name.trim(), description: form.description.trim(), price: Number(form.price) || 0,
-  } : s));
+  const removeProduct = async (id) => {
+    const { error } = await supabase.from("produtos").delete().eq("id", id);
+    if (error) { setErrorMsg("Erro ao excluir produto."); return; }
+    setProducts(products.filter((p) => p.id !== id));
+  };
 
-  const registerSale = ({ type, itemId, itemName, unitPrice, quantity, payment }) => {
-    const sale = {
-      id: crypto.randomUUID(), type, itemId, itemName, unitPrice, quantity,
-      total: unitPrice * quantity, payment, date: new Date().toISOString(),
+  const addService = async (form) => {
+    const payload = { name: form.name.trim(), description: form.description.trim(), price: Number(form.price) || 0 };
+    const { data, error } = await supabase.from("servicos").insert(payload).select().single();
+    if (error) { setErrorMsg("Erro ao salvar serviço."); return; }
+    setServices([mapServico(data), ...services]);
+  };
+  const updateService = async (id, form) => {
+    const payload = { name: form.name.trim(), description: form.description.trim(), price: Number(form.price) || 0 };
+    const { error } = await supabase.from("servicos").update(payload).eq("id", id);
+    if (error) { setErrorMsg("Erro ao atualizar serviço."); return; }
+    setServices(services.map((s) => s.id === id ? { ...s, ...payload } : s));
+  };
+  const removeService = async (id) => {
+    const { error } = await supabase.from("servicos").delete().eq("id", id);
+    if (error) { setErrorMsg("Erro ao excluir serviço."); return; }
+    setServices(services.filter((s) => s.id !== id));
+  };
+
+  const addCliente = async (form) => {
+    const payload = { nome: form.nome.trim(), telefone: form.telefone.trim() };
+    const { data, error } = await supabase.from("clientes").insert(payload).select().single();
+    if (error) { setErrorMsg("Erro ao salvar cliente."); return; }
+    setClientes([mapCliente(data), ...clientes]);
+  };
+  const updateCliente = async (id, form) => {
+    const payload = { nome: form.nome.trim(), telefone: form.telefone.trim() };
+    const { error } = await supabase.from("clientes").update(payload).eq("id", id);
+    if (error) { setErrorMsg("Erro ao atualizar cliente."); return; }
+    setClientes(clientes.map((c) => c.id === id ? { ...c, ...payload } : c));
+  };
+  const removeCliente = async (id) => {
+    const { error } = await supabase.from("clientes").delete().eq("id", id);
+    if (error) { setErrorMsg("Não foi possível excluir: esse cliente tem veículos ou vendas vinculadas."); return; }
+    setClientes(clientes.filter((c) => c.id !== id));
+    setVeiculos(veiculos.filter((v) => v.clienteId !== id));
+  };
+
+  const addVeiculo = async (clienteId, form) => {
+    const payload = { cliente_id: clienteId, placa: form.placa.trim().toUpperCase(), marca: form.marca.trim(), modelo: form.modelo.trim(), ano: form.ano.trim() };
+    const { data, error } = await supabase.from("veiculos").insert(payload).select().single();
+    if (error) { setErrorMsg("Erro ao salvar veículo."); return; }
+    setVeiculos([mapVeiculo(data), ...veiculos]);
+  };
+  const updateVeiculo = async (id, form) => {
+    const payload = { placa: form.placa.trim().toUpperCase(), marca: form.marca.trim(), modelo: form.modelo.trim(), ano: form.ano.trim() };
+    const { error } = await supabase.from("veiculos").update(payload).eq("id", id);
+    if (error) { setErrorMsg("Erro ao atualizar veículo."); return; }
+    setVeiculos(veiculos.map((v) => v.id === id ? { ...v, ...payload, placa: payload.placa } : v));
+  };
+  const removeVeiculo = async (id) => {
+    const { error } = await supabase.from("veiculos").delete().eq("id", id);
+    if (error) { setErrorMsg("Não foi possível excluir: esse veículo tem vendas vinculadas."); return; }
+    setVeiculos(veiculos.filter((v) => v.id !== id));
+  };
+
+  const registerSale = async ({ type, itemId, itemName, unitPrice, quantity, payment, clienteId, veiculoId }) => {
+    const payload = {
+      type, item_id: itemId, item_name: itemName, unit_price: unitPrice, quantity,
+      total: unitPrice * quantity, payment, cliente_id: clienteId || null, veiculo_id: veiculoId || null,
     };
+    const { data, error } = await supabase.from("vendas").insert(payload).select().single();
+    if (error) { setErrorMsg("Erro ao registrar venda."); return; }
+    const sale = mapVenda(data);
     setSales([sale, ...sales]);
     if (type === "produto") {
-      setProducts(products.map((p) => p.id === itemId ? { ...p, stock: Math.max(0, p.stock - quantity) } : p));
+      const prod = products.find((p) => p.id === itemId);
+      const newStock = Math.max(0, (prod?.stock || 0) - quantity);
+      await supabase.from("produtos").update({ stock: newStock }).eq("id", itemId);
+      setProducts(products.map((p) => p.id === itemId ? { ...p, stock: newStock } : p));
     }
     setReceiptSale(sale);
   };
 
-  const removeSale = (id) => {
+  const removeSale = async (id) => {
     const sale = sales.find((s) => s.id === id);
+    const { error } = await supabase.from("vendas").delete().eq("id", id);
+    if (error) { setErrorMsg("Erro ao estornar venda."); return; }
     if (sale && sale.type === "produto") {
-      setProducts(products.map((p) => p.id === sale.itemId ? { ...p, stock: p.stock + sale.quantity } : p));
+      const prod = products.find((p) => p.id === sale.itemId);
+      if (prod) {
+        const newStock = prod.stock + sale.quantity;
+        await supabase.from("produtos").update({ stock: newStock }).eq("id", sale.itemId);
+        setProducts(products.map((p) => p.id === sale.itemId ? { ...p, stock: newStock } : p));
+      }
     }
     setSales(sales.filter((s) => s.id !== id));
   };
@@ -98,23 +179,27 @@ export default function App() {
   const stats = useMemo(() => {
     const stockValue = products.reduce((sum, p) => sum + p.price * p.stock, 0);
     const lowStock = products.filter((p) => p.stock <= 3).length;
-    const avgServicePrice = services.length ? services.reduce((s, x) => s + x.price, 0) / services.length : 0;
     const revenueTotal = sales.reduce((s, x) => s + x.total, 0);
     const revenueByPayment = PAYMENT_METHODS.reduce((acc, m) => {
       acc[m] = sales.filter((s) => s.payment === m).reduce((sum, s) => sum + s.total, 0);
       return acc;
     }, {});
-    return { stockValue, lowStock, avgServicePrice, totalProducts: products.length, totalServices: services.length, revenueTotal, revenueByPayment };
-  }, [products, services, sales]);
+    return { stockValue, lowStock, totalProducts: products.length, totalServices: services.length, totalClientes: clientes.length, revenueTotal, revenueByPayment };
+  }, [products, services, sales, clientes]);
 
   const go = (v) => { setView(v); setMobileNavOpen(false); };
 
   const navItems = [
     { key: "dashboard", label: "Painel", icon: LayoutGrid },
+    { key: "clientes", label: "Clientes", icon: Users },
     { key: "produtos", label: "Produtos", icon: Package },
     { key: "servicos", label: "Serviços", icon: Wrench },
     { key: "vendas", label: "Vendas", icon: ShoppingCart },
   ];
+
+  if (loading) {
+    return <div className="app-shell"><div className="main-area"><div className="page"><p className="subheading">Carregando dados...</p></div></div></div>;
+  }
 
   return (
     <div className="app-shell">
@@ -145,19 +230,23 @@ export default function App() {
 
       <main className="main-area">
         <div className="page">
+          {errorMsg && <p className="form-error" style={{ marginBottom: 18 }}>{errorMsg}</p>}
           {view === "dashboard" && <Dashboard stats={stats} setView={setView} sales={sales} />}
-          {view === "produtos" && <ProductsPage products={products} onAdd={addProduct} onUpdate={updateProduct} onRemove={removeProduct} nextCode={nextCode} onSell={registerSale} />}
-          {view === "servicos" && <ServicesPage services={services} onAdd={addService} onUpdate={updateService} onRemove={removeService} onSell={registerSale} />}
-          {view === "vendas" && <VendasPage sales={sales} products={products} services={services} onSell={registerSale} onRemove={removeSale} />}
+          {view === "clientes" && <ClientesPage clientes={clientes} veiculos={veiculos} onAdd={addCliente} onUpdate={updateCliente} onRemove={removeCliente} onAddVeiculo={addVeiculo} onUpdateVeiculo={updateVeiculo} onRemoveVeiculo={removeVeiculo} />}
+          {view === "produtos" && <ProductsPage products={products} onAdd={addProduct} onUpdate={updateProduct} onRemove={removeProduct} nextCode={nextCode} onSell={registerSale} clientes={clientes} veiculos={veiculos} />}
+          {view === "servicos" && <ServicesPage services={services} onAdd={addService} onUpdate={updateService} onRemove={removeService} onSell={registerSale} clientes={clientes} veiculos={veiculos} />}
+          {view === "vendas" && <VendasPage sales={sales} products={products} services={services} clientes={clientes} veiculos={veiculos} onSell={registerSale} onRemove={removeSale} />}
         </div>
       </main>
 
-      {receiptSale && <ReceiptModal sale={receiptSale} onClose={() => setReceiptSale(null)} />}
+      {receiptSale && <ReceiptModal sale={receiptSale} clientes={clientes} veiculos={veiculos} onClose={() => setReceiptSale(null)} />}
     </div>
   );
 }
 
-function ReceiptModal({ sale, onClose }) {
+function ReceiptModal({ sale, clientes, veiculos, onClose }) {
+  const cliente = clientes.find((c) => c.id === sale.clienteId);
+  const veiculo = veiculos.find((v) => v.id === sale.veiculoId);
   return (
     <div className="modal-backdrop no-print-hide">
       <div className="receipt-modal">
@@ -166,6 +255,8 @@ function ReceiptModal({ sale, onClose }) {
           <p className="receipt-sub">Recibo de venda (comprovante não fiscal)</p>
           <div className="receipt-divider" />
           <p className="receipt-line"><span>Data</span><span>{new Date(sale.date).toLocaleString("pt-BR")}</span></p>
+          {cliente && <p className="receipt-line"><span>Cliente</span><span>{cliente.nome}</span></p>}
+          {veiculo && <p className="receipt-line"><span>Veículo</span><span>{veiculo.placa} — {veiculo.marca} {veiculo.modelo}</span></p>}
           <p className="receipt-line"><span>Item</span><span>{sale.itemName}</span></p>
           <p className="receipt-line"><span>Tipo</span><span>{sale.type === "produto" ? "Produto" : "Serviço"}</span></p>
           <p className="receipt-line"><span>Quantidade</span><span>{sale.quantity}</span></p>
@@ -222,20 +313,23 @@ function Dashboard({ stats, setView, sales }) {
   );
 }
 
-function SaleModal({ presetItem, allItems, onClose, onConfirm }) {
+function SaleModal({ presetItem, allItems, clientes, veiculos, onClose, onConfirm }) {
   const [itemId, setItemId] = useState(presetItem ? `${presetItem.type}:${presetItem.id}` : "");
   const [quantity, setQuantity] = useState(1);
   const [payment, setPayment] = useState("Dinheiro");
+  const [clienteId, setClienteId] = useState("");
+  const [veiculoId, setVeiculoId] = useState("");
   const [error, setError] = useState("");
 
   const item = presetItem || (allItems || []).find((i) => `${i.type}:${i.id}` === itemId);
   const total = item ? item.price * quantity : 0;
+  const veiculosDoCliente = veiculos.filter((v) => v.clienteId === clienteId);
 
   const submit = (e) => {
     e.preventDefault();
     if (!item) { setError("Selecione um item."); return; }
     if (item.type === "produto" && quantity > item.stock) { setError(`Estoque insuficiente (disponível: ${item.stock}).`); return; }
-    onConfirm({ type: item.type, itemId: item.id, itemName: item.name, unitPrice: item.price, quantity, payment });
+    onConfirm({ type: item.type, itemId: item.id, itemName: item.name, unitPrice: item.price, quantity, payment, clienteId: clienteId || null, veiculoId: veiculoId || null });
   };
 
   return (
@@ -264,6 +358,21 @@ function SaleModal({ presetItem, allItems, onClose, onConfirm }) {
         {presetItem && <div className="barcode-note"><ShoppingCart size={14} /> Vendendo: <span>{presetItem.name}</span></div>}
 
         <div className="form-row">
+          <label>Cliente (opcional)
+            <select value={clienteId} onChange={(e) => { setClienteId(e.target.value); setVeiculoId(""); }}>
+              <option value="">Sem cliente</option>
+              {clientes.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </label>
+          <label>Veículo (opcional)
+            <select value={veiculoId} onChange={(e) => setVeiculoId(e.target.value)} disabled={!clienteId}>
+              <option value="">Sem veículo</option>
+              {veiculosDoCliente.map((v) => <option key={v.id} value={v.id}>{v.placa} — {v.marca} {v.modelo}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <div className="form-row">
           <label>Quantidade<input type="number" min="1" value={quantity} onChange={(e) => { setQuantity(Number(e.target.value) || 1); setError(""); }} /></label>
           <label>Total<input readOnly value={money.format(total)} /></label>
         </div>
@@ -288,7 +397,107 @@ function SaleModal({ presetItem, allItems, onClose, onConfirm }) {
   );
 }
 
-function ProductsPage({ products, onAdd, onUpdate, onRemove, nextCode, onSell }) {
+function ClientesPage({ clientes, veiculos, onAdd, onUpdate, onRemove, onAddVeiculo, onUpdateVeiculo, onRemoveVeiculo }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [form, setForm] = useState(emptyClienteForm);
+  const [veiculoModal, setVeiculoModal] = useState(null);
+  const [veiculoForm, setVeiculoForm] = useState(emptyVeiculoForm);
+
+  const filtered = clientes.filter((c) => c.nome.toLowerCase().includes(query.toLowerCase()));
+
+  const startEdit = (c) => { setForm({ nome: c.nome, telefone: c.telefone }); setEditItem(c); };
+  const closeModal = () => { setOpen(false); setEditItem(null); setForm(emptyClienteForm); };
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.nome.trim()) return;
+    if (editItem) { onUpdate(editItem.id, form); } else { onAdd(form); }
+    closeModal();
+  };
+
+  const openVeiculoModal = (clienteId, editV) => {
+    setVeiculoForm(editV ? { placa: editV.placa, marca: editV.marca, modelo: editV.modelo, ano: editV.ano } : emptyVeiculoForm);
+    setVeiculoModal({ clienteId, editItem: editV || null });
+  };
+  const submitVeiculo = (e) => {
+    e.preventDefault();
+    if (!veiculoForm.placa.trim()) return;
+    if (veiculoModal.editItem) { onUpdateVeiculo(veiculoModal.editItem.id, veiculoForm); } else { onAddVeiculo(veiculoModal.clienteId, veiculoForm); }
+    setVeiculoModal(null);
+  };
+
+  return (
+    <div>
+      <div className="page-heading">
+        <div><p className="eyebrow">BASE DE CLIENTES</p><h1>Clientes</h1><p className="subheading">Clientes e veículos, com histórico ligado às vendas.</p></div>
+        <button className="primary-button" onClick={() => setOpen(true)}><Plus size={17} /> Novo cliente</button>
+      </div>
+      <div className="table-toolbar">
+        <div className="search-box"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar cliente" /></div>
+        <p>{filtered.length} cliente(s)</p>
+      </div>
+
+      <div className="clientes-list">
+        {filtered.length ? filtered.map((c) => {
+          const carros = veiculos.filter((v) => v.clienteId === c.id);
+          return (
+            <div className="cliente-card" key={c.id}>
+              <div className="cliente-header">
+                <div><strong>{c.nome}</strong><small>{c.telefone || "Sem telefone"}</small></div>
+                <div className="row-actions">
+                  <button className="icon-button" title="Editar" onClick={() => startEdit(c)}><Pencil size={15} /></button>
+                  <button className="icon-button danger" title="Excluir" onClick={() => onRemove(c.id)}><Trash2 size={15} /></button>
+                </div>
+              </div>
+              <div className="veiculos-list">
+                {carros.map((v) => (
+                  <div className="veiculo-chip" key={v.id}>
+                    <Car size={14} />
+                    <span>{v.placa} — {v.marca} {v.modelo} {v.ano && `(${v.ano})`}</span>
+                    <button className="icon-button" title="Editar veículo" onClick={() => openVeiculoModal(c.id, v)}><Pencil size={13} /></button>
+                    <button className="icon-button danger" title="Excluir veículo" onClick={() => onRemoveVeiculo(v.id)}><Trash2 size={13} /></button>
+                  </div>
+                ))}
+                <button className="add-veiculo-btn" onClick={() => openVeiculoModal(c.id, null)}><Plus size={14} /> Adicionar veículo</button>
+              </div>
+            </div>
+          );
+        }) : (
+          <div className="empty-services"><Users size={26} />Nenhum cliente cadastrado ainda.</div>
+        )}
+      </div>
+
+      {(open || editItem) && (
+        <div className="modal-backdrop">
+          <form className="form-modal" onSubmit={submit}>
+            <div className="modal-title"><div><p className="eyebrow">{editItem ? "EDITAR CLIENTE" : "NOVO CLIENTE"}</p><h2>{editItem ? "Editar cliente" : "Cadastrar cliente"}</h2></div><button type="button" className="icon-button" onClick={closeModal}><X size={18} /></button></div>
+            <label>Nome<input required value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} /></label>
+            <label>Telefone<input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} /></label>
+            <button type="submit" className="primary-button full-button">{editItem ? "Salvar alterações" : "Salvar cliente"}</button>
+          </form>
+        </div>
+      )}
+
+      {veiculoModal && (
+        <div className="modal-backdrop">
+          <form className="form-modal" onSubmit={submitVeiculo}>
+            <div className="modal-title"><div><p className="eyebrow">{veiculoModal.editItem ? "EDITAR VEÍCULO" : "NOVO VEÍCULO"}</p><h2>{veiculoModal.editItem ? "Editar veículo" : "Cadastrar veículo"}</h2></div><button type="button" className="icon-button" onClick={() => setVeiculoModal(null)}><X size={18} /></button></div>
+            <label>Placa<input required value={veiculoForm.placa} onChange={(e) => setVeiculoForm({ ...veiculoForm, placa: e.target.value })} /></label>
+            <div className="form-row">
+              <label>Marca<input value={veiculoForm.marca} onChange={(e) => setVeiculoForm({ ...veiculoForm, marca: e.target.value })} /></label>
+              <label>Modelo<input value={veiculoForm.modelo} onChange={(e) => setVeiculoForm({ ...veiculoForm, modelo: e.target.value })} /></label>
+            </div>
+            <label>Ano<input value={veiculoForm.ano} onChange={(e) => setVeiculoForm({ ...veiculoForm, ano: e.target.value })} /></label>
+            <button type="submit" className="primary-button full-button">{veiculoModal.editItem ? "Salvar alterações" : "Salvar veículo"}</button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductsPage({ products, onAdd, onUpdate, onRemove, nextCode, onSell, clientes, veiculos }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -359,13 +568,13 @@ function ProductsPage({ products, onAdd, onUpdate, onRemove, nextCode, onSell })
       )}
 
       {sellItem && (
-        <SaleModal presetItem={sellItem} onClose={() => setSellItem(null)} onConfirm={(sale) => { onSell(sale); setSellItem(null); }} />
+        <SaleModal presetItem={sellItem} clientes={clientes} veiculos={veiculos} onClose={() => setSellItem(null)} onConfirm={(sale) => { onSell(sale); setSellItem(null); }} />
       )}
     </div>
   );
 }
 
-function ServicesPage({ services, onAdd, onUpdate, onRemove, onSell }) {
+function ServicesPage({ services, onAdd, onUpdate, onRemove, onSell, clientes, veiculos }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -427,13 +636,13 @@ function ServicesPage({ services, onAdd, onUpdate, onRemove, onSell }) {
       )}
 
       {sellItem && (
-        <SaleModal presetItem={sellItem} onClose={() => setSellItem(null)} onConfirm={(sale) => { onSell(sale); setSellItem(null); }} />
+        <SaleModal presetItem={sellItem} clientes={clientes} veiculos={veiculos} onClose={() => setSellItem(null)} onConfirm={(sale) => { onSell(sale); setSellItem(null); }} />
       )}
     </div>
   );
 }
 
-function VendasPage({ sales, products, services, onSell, onRemove }) {
+function VendasPage({ sales, products, services, clientes, veiculos, onSell, onRemove }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [viewReceipt, setViewReceipt] = useState(null);
@@ -443,6 +652,7 @@ function VendasPage({ sales, products, services, onSell, onRemove }) {
   ];
   const filtered = sales.filter((s) => s.itemName.toLowerCase().includes(query.toLowerCase()));
   const total = sales.reduce((sum, s) => sum + s.total, 0);
+  const clienteNome = (id) => clientes.find((c) => c.id === id)?.nome;
 
   return (
     <div>
@@ -456,12 +666,12 @@ function VendasPage({ sales, products, services, onSell, onRemove }) {
       </div>
       <div className="data-table-wrap">
         <table>
-          <thead><tr><th>Item</th><th>Tipo</th><th>Qtd.</th><th>Pagamento</th><th>Total</th><th></th></tr></thead>
+          <thead><tr><th>Item</th><th>Cliente</th><th>Qtd.</th><th>Pagamento</th><th>Total</th><th></th></tr></thead>
           <tbody>
             {filtered.length ? filtered.map((s) => (
               <tr key={s.id}>
                 <td><strong>{s.itemName}</strong><small>{new Date(s.date).toLocaleString("pt-BR")}</small></td>
-                <td>{s.type === "produto" ? "Produto" : "Serviço"}</td>
+                <td>{clienteNome(s.clienteId) || "—"}</td>
                 <td>{s.quantity}</td>
                 <td><span className="payment-chip small">{s.payment}</span></td>
                 <td>{money.format(s.total)}</td>
@@ -478,10 +688,10 @@ function VendasPage({ sales, products, services, onSell, onRemove }) {
       </div>
 
       {open && (
-        <SaleModal allItems={allItems} onClose={() => setOpen(false)} onConfirm={(sale) => { onSell(sale); setOpen(false); }} />
+        <SaleModal allItems={allItems} clientes={clientes} veiculos={veiculos} onClose={() => setOpen(false)} onConfirm={(sale) => { onSell(sale); setOpen(false); }} />
       )}
 
-      {viewReceipt && <ReceiptModal sale={viewReceipt} onClose={() => setViewReceipt(null)} />}
+      {viewReceipt && <ReceiptModal sale={viewReceipt} clientes={clientes} veiculos={veiculos} onClose={() => setViewReceipt(null)} />}
     </div>
   );
 }
