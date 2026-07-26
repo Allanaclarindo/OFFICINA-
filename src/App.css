@@ -94,6 +94,24 @@ td small { color: #898989; font-size: 11px; }
 .barcode-note { display: flex; gap: 9px; align-items: center; color: #929292; font-size: 11px; border: 1px solid #2a2a2a; background: #101010; padding: 10px; margin: 14px 0 0; }
 .barcode-note span { font-family: monospace; color: #ddd; }
 .full-button { width: 100%; margin-top: 18px; }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.service-actions { position: absolute; right: 18px; top: 18px; display: flex; gap: 6px; }
+.icon-button:disabled { opacity: .35; cursor: not-allowed; }
+
+/* Sales / payments */
+.payment-breakdown { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 18px; }
+.payment-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #ddd; background: #1c1712; border: 1px solid #3d251b; padding: 6px 10px; }
+.payment-chip.small { background: #1b1b1b; border: 1px solid #303030; color: #ccc; padding: 4px 8px; font-size: 11px; }
+.recent-sale { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #222; padding: 12px 0; font-size: 13px; }
+.recent-sale strong { display: block; font-size: 13px; }
+.recent-sale small { color: #888; font-size: 11px; }
+.recent-sale span { color: #ff7043; font-weight: 600; font-size: 13px; }
+.muted-note { color: #777; font-size: 12px; padding: 10px 0; }
+.payment-select { display: flex; gap: 8px; margin-top: 4px; }
+.payment-option { flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px; height: 42px; border: 1px solid #303030; background: #0d0d0d; color: #aaa; font-size: 13px; border-radius: 2px; transition: border-color .2s, color .2s, background-color .2s; }
+.payment-option:hover { color: #ddd; }
+.payment-option.active { border-color: #ff5722; color: #fff; background: #24140c; }
+.form-modal select { color: #f6f6f6; background: #0d0d0d; border: 1px solid #303030; padding: 10px 12px; outline: none; border-radius: 2px; font-size: 14px; }
 
 @media (max-width: 980px) {
   .page { padding: 40px 32px; }
