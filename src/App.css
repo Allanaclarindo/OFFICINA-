@@ -113,6 +113,26 @@ td small { color: #898989; font-size: 11px; }
 .payment-option.active { border-color: #ff5722; color: #fff; background: #24140c; }
 .form-modal select { color: #f6f6f6; background: #0d0d0d; border: 1px solid #303030; padding: 10px 12px; outline: none; border-radius: 2px; font-size: 14px; }
 
+/* Receipt */
+.receipt-modal { width: min(100%, 380px); background: #141414; border: 1px solid #333; box-shadow: 0 20px 60px rgba(0,0,0,.55); padding: 26px; }
+.receipt-print-area { background: #fff; color: #111; padding: 22px; font-family: monospace; }
+.receipt-brand { font: 900 20px "Cabinet Grotesk", sans-serif; margin: 0; }
+.receipt-brand span { color: #ff5722; }
+.receipt-sub { font-size: 11px; color: #666; margin: 4px 0 0; }
+.receipt-divider { border-top: 1px dashed #999; margin: 14px 0; }
+.receipt-line { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; margin: 6px 0; }
+.receipt-line span:first-child { color: #666; }
+.receipt-total { display: flex; justify-content: space-between; font-size: 16px; font-weight: 700; margin: 0; }
+.receipt-actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+.receipt-actions .full-button { margin-top: 0; }
+
+@media print {
+  body * { visibility: hidden; }
+  .receipt-print-area, .receipt-print-area * { visibility: visible; }
+  .receipt-print-area { position: fixed; inset: 0; padding: 30px; }
+  .no-print { display: none !important; }
+}
+
 @media (max-width: 980px) {
   .page { padding: 40px 32px; }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
